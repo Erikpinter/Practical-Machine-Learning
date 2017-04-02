@@ -1,0 +1,152 @@
+---
+title: "Peer-graded Assignment: Prediction Assignment Writeup"
+author: "Erik Pinter, 31.03.2017"
+date: "31 03 2017"
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 9.5
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/_FILES/_STUDIES_/2016 Data Science/08_Practical Machine Learning/Week 4")
+library(caret)
+library(rattle)
+library(rpart)
+library(randomForest)
+```
+
+## Summary
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your **goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants**. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset).
+
+The goal of this project is to **predict the manner in which they did the exercise**. This is the **"classe"** variable in the training set. You may use any of the other variables to predict with. You should create a report describing **how you built your model**, how you used **cross validation**, what you think the **expected out of sample error** is, and why you made the **choices** you did. You will also use your prediction model to **predict 20 different test cases**.
+
+
+## Data
+The data originates from the Human Activity Recognition Project's **Weight Lifting Exercises dataset** (<http://groupware.les.inf.puc-rio.br/har>).  
+It has been published under the *Creative Commons license (CC BY-SA)*: by *Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.*  
+
+The **training data** for this project are available here:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+The **20 test cases** are available here:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+On first inspection of the data, we realise a lot of *"NA"*,*"#DIV/0!"* and *empty values ""* in the dataset. The easiest way to get rid of them, is to specify these parameters on import. This also assures, that all numeric data is recognized as such.
+
+```{r load data, cache=TRUE}
+# download training & test data
+training  <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", stringsAsFactors = FALSE, na.strings=c("NA","#DIV/0!", ""))
+dim(training) # check dimensions 
+
+testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", stringsAsFactors = FALSE,na.strings=c("NA","#DIV/0!", ""))
+dim(testing) # check dimensions  
+#str(training)
+```
+
+
+## Data tidying / Preprocessing
+
+The training dataset includes a total of `r nrow(training)` observations and `r ncol(training)` variables. In order to **reduce unneccesary variables**, the first seven columns are dropped, as they include no variables we want to build our prediction model upon (*"X", "user_name", "raw_timestamp",...*).  
+
+```{r tidy_1}
+# drop the first 7 columns
+training <- training[,-c(1:7)]
+```
+
+A lot of columns include **large numbers of `NA` values**. These columns will be filtered to gain a tidy dataset for prediction model building.
+
+```{r tidy_2}
+# filter columns, that include NA values
+training <- training[, colSums(is.na(training))==0]
+dim(training)
+```
+
+Thereafter we use the **NZV nearZeroVar function** of the `caret` package on the remaining columns to filter all variables that have only very few unique values relative to the number of samples and the ratio of the frequency of the most common value to the frequency of the second most common value is large.  
+
+```{r tidy_3, echo=TRUE, cache=TRUE}
+# Filter Zero- and Near Zero-Variance Predictors: (https://topepo.github.io/caret/pre-processing.html#nzv)
+NZV <- nearZeroVar(training, saveMetrics= TRUE)
+training <- training[,!NZV$nzv]
+
+# convert the classe column to a factor
+training$classe <- factor(training$classe)
+```
+
+The nearZeroVar function does not further reduce the number of variables.  
+After tidying our training dataset has at **total of `r ncol(training)` variables** we will use for the prediciton model building.
+
+## Prediction Model Building
+
+### Splitting the training dataset
+
+In order to later allow cross-validation of our models, we first need to **split the tidy training data into a training (70%) and a testing set (30%)**.
+
+```{r splitdata}
+set.seed(1000)
+# split testing set
+inTrain  <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+trainingSet <- training[inTrain, ]
+testingSet  <- training[-inTrain, ]
+```
+
+
+### Recursive Partitioning and Regression Trees
+
+The first model we will use is the **recursive partitioning and regression trees model (`rpart`)**. 
+
+```{r model_rpart1, eval=FALSE}
+mod_rpart1 <- train(classe ~., data = trainingSet, method = "rpart")
+mod_rpart1$finalModel
+mod_rpart1$results
+
+```
+
+```{r model_rpart, eval=TRUE}
+# library(rpart)
+mod_rpart <- rpart(classe ~., data = trainingSet, method = "class")
+```
+
+### Random Forest
+The second prediction model we build is using the **"Random Forest" model**:
+
+```{r model_rf, eval=TRUE, warning=FALSE}
+# library(randomForest)
+set.seed(1000)
+mod_rf <- randomForest(classe ~. , data=trainingSet, method="class")
+```
+
+##      Cross Validation
+
+To evaluate and compare the two prediction models, we use the `confusion matrix` based on the testing data set, that was split from the original training data set:
+
+```{r eval_model_rpart, eval = TRUE}
+# generate predictions for test dataset and show confusion matrix
+pred_mod_rpart <- predict(mod_rpart, newdata = testingSet, type = "class")
+confusionMatrix(pred_mod_rpart, testingSet$classe)
+
+pred_mod_rf <- predict(mod_rf, newdata = testingSet)
+confusionMatrix(pred_mod_rf, testingSet$classe)
+```
+
+By comparing the two confusion matrices we see that the **accuracy of the decision tree model is about 77%** compared to the accuracy of the second model generated by the **random forest algorithm, which is about 99%**.  
+**Therefore the model generated by the random forest algorithm is the model we chose for the prediction of the test set. The estimated error rate of the chosen model is less than 1%.**  
+
+## Predicting the 20 test cases
+
+In the last step, the developed machine learning algorithm is used to **predict the `classe? for the 20 test cases**. 
+```{r predict test set, eval = TRUE}
+# predictions are made for the 20 test cases 
+pred_mod_rf_test <- predict(mod_rf, newdata = testing)
+pred_mod_rf_test
+
+```
+  
+**The Course Project Prediction Quiz reveals that the chosen prediction model delivered correct predictions for all 20 test cases**. 
+  
+*erik(dot)pinter(at)gmail(dot)com, 2017*
